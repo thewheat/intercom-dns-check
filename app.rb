@@ -118,11 +118,19 @@ end
 def get_root_domain(domain)
 	PublicSuffix.domain(domain)
 end
-def get_dns_host(domain)
+def get_dns_hosts(domain)
 	hosts = DnsCheck.new(domain).ns.map{|ns|
 		get_root_domain(ns.name)
 	}
 	return hosts.uniq
+end
+
+def has_cloudflare_as_dns(dns_hosts)
+	return false if dns_hosts.nil? || dns_hosts.empty?
+	dns_hosts.each{|dns_host|
+		return true if is_cloudflare(dns_host)
+	}
+	return false
 end
 
 def is_cloudflare(dns_host)
@@ -133,6 +141,141 @@ end
 def output_log(data)
 	return "" if data.nil? || data.strip.empty?
 	return "<div class='log'>#{data}</div>"
+end
+
+def check_dkim(domain)
+	dkim_output = ""
+	if !domain.nil? && !domain.strip.empty?
+		dkim_output += "<div>Checking domain for DKIM verification: #{domain}....</div>"
+		begin
+			root_domain = get_root_domain(domain)
+		rescue
+			dkim_output += "<div class='error'>Problem retrieving root domain. #{abort_message}</div>"
+			return dkim_output
+		end
+		if root_domain != domain
+			dkim_output += "<div>Root domain: <code>#{root_domain}</code></div>"
+		end
+
+		begin
+			dns_hosts = get_dns_hosts(root_domain)
+		rescue
+			dkim_output += "<div class='error'>Problem retrieving DNS host. Will continue processing but may not be 100% accurate</div>"
+		end
+		begin
+			nameservers = get_nameservers(root_domain) if dns_hosts.nil? || dns_hosts.empty? || dns_hosts.count == 0
+		rescue
+			dkim_output += "<div class='error'>Problem retrieving nameservers host. . Will continue processing but may not be 100% accurate</div>"
+		end
+		cname = get_cname(get_intercom_dkim(root_domain))
+		double_domain = get_cname(get_intercom_dkim_double_domain(root_domain))
+		if dns_hosts
+			has_cloudflare_as_dns = has_cloudflare_as_dns(dns_hosts)
+			dns_hosts = dns_hosts.first if dns_hosts.count == 1
+		end
+
+		if dns_hosts
+			dkim_output += "<div>DNS provider: <code>#{dns_hosts}</code></div>"
+		end
+		if nameservers
+			dkim_output += "<div>Nameservers: [#{nameservers.join('][')}]</div>"
+		end
+		if cname 
+			dkim_output += "<div class='success'>CNAME exists for #{get_intercom_dkim(root_domain)}. <BR><code class='indent'>#{cname}</code> <br> Ensure it is the same as what you see in Intercom</div>"
+		end
+		if dns_hosts && has_cloudflare_as_dns
+			dkim_output += "<div class='warn'>It looks like you're using Cloudflare. If you're having issues, ensure that you have <a href='https://support.cloudflare.com/hc/en-us/articles/200169056-CNAME-Flattening-RFC-compliant-support-for-CNAME-at-the-root'>disabled CNAME flattening</a> and that the DNS entry has a <a href='https://support.cloudflare.com/hc/en-us/articles/200169626-What-subdomains-are-appropriate-for-orange-gray-clouds-'>gray cloud to ensure the traffic goes to Intercom</a></div>"
+		end
+		if double_domain
+			dkim_output += "<div class='error'>CNAME exist for #{get_intercom_dkim_double_domain(root_domain)}. <BR><code class='indent'>#{double_domain}</code>.</div>"
+			dkim_output += "<div class='error'>This is likely an incorrect entry. If you have specified <code>#{get_intercom_dkim(root_domain)}</code> in your DNS server try use <code>#{get_intercom_dkim_base}</code> instead. Some DNS servers automatically add the domain name which can cause this error</div>"
+		end
+
+
+		txts = get_txt(get_intercom_dkim(root_domain))
+		if !txts.nil? && txts.count > 0 
+			if !txt_has_cname(txts) && txt_has_txt(txts)
+				dkim_output += "<div class='error'>TXT record exist for #{get_intercom_dkim(root_domain)}. This will prevent use from verifying the domain</div>"
+			elsif txt_has_cname(txts) && txt_has_txt(txts)
+			else
+				dkim_output += "<div>TXT records exist for #{get_intercom_dkim(root_domain)}. This could prevent verificatin of domian and should be removed <li> #{txts.join('<li>')}</div>"
+			end
+		end
+
+		dkim_output += "<div class='footnote'>You can also <a href='https://mxtoolbox.com/SuperTool.aspx?action=cname%3a#{get_intercom_dkim(root_domain)}'>check your your domain via MXToolbox</a></div>"
+	end
+	return dkim_output
+end
+
+def abort_message
+	"Can't complete check. Ensure you have specified a correct domain / URL"
+end
+
+def check_custom_domain (custom_domain)
+	custom_domain_output = ""
+	if !custom_domain.nil? && !custom_domain.strip.empty?
+		custom_domain_output += "<div>Checking Articles Custom Domain: <code>#{custom_domain}</code>....</div>"
+
+		begin
+			root_domain = get_root_domain(custom_domain)
+		rescue
+			custom_domain_output += "<div class='error'>Problem retrieving root domain. #{abort_message}</div>"
+			return custom_domain_output
+		end
+
+		if root_domain.nil? || root_domain.strip.empty?
+			custom_domain_output += "<div class='error'>Problem retrieving root domain. #{abort_message}</div>"
+			return custom_domain_output
+		end
+
+		begin
+			dns_hosts = get_dns_hosts(root_domain)
+		rescue
+			custom_domain_output += "<div class='error'>Problem retrieving DNS host. Will continue processing but may not be 100% accurate</div>"
+		end
+		begin
+			nameservers = get_nameservers(root_domain) if dns_hosts.nil? || dns_hosts.empty? || dns_hosts.count == 0
+		rescue
+			custom_domain_output += "<div class='error'>Problem retrieving nameservers. Will continue processing but may not be 100% accurate</div>"
+		end
+
+
+		begin
+			cname = get_cname(custom_domain)
+		rescue
+			custom_domain_output += "<div class='error'>Problem retrieving CNAME on domain. #{abort_message}</div>"
+			return custom_domain_output
+		end
+
+		if cname.nil? || cname.empty?
+			className = "error"
+			custom_domain_output += "<div class='error'>No CNAME value set up. It needs to be <br><code class='indent'>#{get_articles_cname_value}</code></div>"
+		elsif cname != get_articles_cname_value
+			className = "error"
+			custom_domain_output += "<div class='error'>Looks like you have an incorrect CNAME value. It needs to be <br><code class='indent'>#{get_articles_cname_value}</code></div>"
+		else
+			className = "success"
+			custom_domain_output += "<div class='success'>CNAME looks correctly configured</div>"
+		end
+		custom_domain_output += "<div class='#{className}'>CNAME exists with value <BR><code class='indent'>#{cname}</code></div>" unless (cname.nil? || cname.empty?)
+
+		custom_domain_output += "<HR>"
+
+		if dns_hosts
+			dns_hosts = dns_hosts.first if dns_hosts.count == 1
+		end
+		if root_domain && root_domain != custom_domain
+			custom_domain_output += "<div>Root domain: <code>#{root_domain}</code></div>"
+		end
+		if dns_hosts
+			custom_domain_output += "<div>DNS provider: <code>#{dns_hosts}</code></div>"
+		end
+		if nameservers
+			custom_domain_output += "<div>Nameservers: [#{nameservers.join('][')}]</div>"
+		end
+		custom_domain_output += "<div class='footnote'>You can also <a href='https://mxtoolbox.com/SuperTool.aspx?action=cname%3a#{custom_domain}'>check your your domain via MXToolbox</a></div>"
+	end
+	return custom_domain_output
 end
 
 get '/' do
@@ -151,85 +294,10 @@ get '/' do
 
 	output += "</style></head><body>"
 
-	dkim_output = ""
-	domain = params["dkim_domain"]
-	if !domain.nil? && !domain.strip.empty?
-		dkim_output += "<div class=''>Checking domain for DKIM verification: #{domain}....</div>"
-		root_domain = get_root_domain(domain)
-		if root_domain != domain
-			dkim_output += "<div class=''>Root domain: <code>#{root_domain}</code></div>"
-		end
-		dns_host = get_dns_host(root_domain)
-		nameservers = get_nameservers(root_domain) if dns_host.nil? || dns_host.empty? || dns_host.count == 0
-		cname = get_cname(get_intercom_dkim(root_domain))
-		double_domain = get_cname(get_intercom_dkim_double_domain(root_domain))
-		dns_host = dns_host.first if dns_host.count == 1 
+	dkim_output = check_dkim(params["dkim_domain"])
 
-		if dns_host
-			dkim_output += "<div class=''>DNS provider: <code>#{dns_host}</code></div>"
-		end
-		if nameservers
-			dkim_output += "<div class=''>Nameservers: [#{nameservers.join('][')}]</div>"
-		end
-		if cname 
-			dkim_output += "<div class='success'>CNAME exists for #{get_intercom_dkim(root_domain)}. <BR><code class='indent'>#{cname}</code> <br> Ensure it is the same as what you see in Intercom</div>"
-		end
-		if dns_host && is_cloudflare(dns_host)
-			dkim_output += "<div class='warn'>It looks like you're using Cloudflare. If you're having issues, ensure that you have <a href='https://support.cloudflare.com/hc/en-us/articles/200169056-CNAME-Flattening-RFC-compliant-support-for-CNAME-at-the-root'>disabled CNAME flattening</a> and that the DNS entry has a <a href='https://support.cloudflare.com/hc/en-us/articles/200169626-What-subdomains-are-appropriate-for-orange-gray-clouds-'>gray cloud to ensure the traffic goes to Intercom</a></div>"
-		end
-		if double_domain
-			dkim_output += "<div class='error'>CNAME exist for #{get_intercom_dkim_double_domain(root_domain)}. <BR><code class='indent'>#{double_domain}</code>.</div>"
-			dkim_output += "<div class='error'>This is likely an incorrect entry. If you have specified <code>#{get_intercom_dkim(root_domain)}</code> in your DNS server try use <code>#{get_intercom_dkim_base}</code> instead. Some DNS servers automatically add the domain name which can cause this error</div>"
-		end
+	custom_domain_output = check_custom_domain(params["custom_domain"])
 
-
-		txts = get_txt(get_intercom_dkim(root_domain))
-		if !txts.nil? && txts.count > 0 
-			if !txt_has_cname(txts) && txt_has_txt(txts)
-				dkim_output += "<div class='error'>TXT record exist for #{get_intercom_dkim(root_domain)}. This will prevent use from verifying the domain</div>"
-			elsif txt_has_cname(txts) && txt_has_txt(txts)
-			else
-				dkim_output += "<div class=''>TXT records exist for #{get_intercom_dkim(root_domain)}. This could prevent verificatin of domian and should be removed <li> #{txts.join('<li>')}</div>"
-			end
-		end
-
-		dkim_output += "<div class='footnote'>You can also <a href='https://mxtoolbox.com/SuperTool.aspx?action=cname%3a#{get_intercom_dkim(root_domain)}'>check your your domain via MXToolbox</a></div>"
-	end
-
-	custom_domain = params["custom_domain"]
-	custom_domain_output = ""
-	if !custom_domain.nil? && !custom_domain.strip.empty?
-		custom_domain_output += "<div class=''>Checking Articles Custom Domain: <code>#{custom_domain}</code>....</div>"
-		root_domain = get_root_domain(custom_domain)
-		dns_host = get_dns_host(root_domain)
-		nameservers = get_nameservers(root_domain) if dns_host.nil? || dns_host.empty? || dns_host.count == 0
-		cname = get_cname(custom_domain)
-		if cname.nil? || cname.empty?
-			className = "error"
-			custom_domain_output += "<div class='error'>No CNAME value set up. It needs to be <br><code class='indent'>#{get_articles_cname_value}</code></div>"
-		elsif cname != get_articles_cname_value
-			className = "error"
-			custom_domain_output += "<div class='error'>Looks like you have an incorrect CNAME value. It needs to be <br><code class='indent'>#{get_articles_cname_value}</code></div>"
-		else
-			className = "success"
-			custom_domain_output += "<div class='success'>CNAME looks correctly configured</div>"
-		end
-		custom_domain_output += "<div class='#{className}'>CNAME exists with value <BR><code class='indent'>#{cname}</code></div>" unless (cname.nil? || cname.empty?)
-
-		custom_domain_output += "<HR>"
-
-		dns_host = dns_host.first if dns_host.count == 1
-		if root_domain != custom_domain
-			custom_domain_output += "<div class=''>Root domain: <code>#{root_domain}</code></div>"
-		end
-		if dns_host
-			custom_domain_output += "<div class=''>DNS provider: <code>#{dns_host}</code></div>"
-		end
-		if nameservers
-			custom_domain_output += "<div class=''>Nameservers: [#{nameservers.join('][')}]</div>"
-		end
-		custom_domain_output += "<div class='footnote'>You can also <a href='https://mxtoolbox.com/SuperTool.aspx?action=cname%3a#{domain}'>check your your domain via MXToolbox</a></div>"
-	end
 	
 	output += "<div class='section'>"
 	output += "<h3>DKIM Domain verification for sending Messages</h3>"
