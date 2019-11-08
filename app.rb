@@ -275,7 +275,9 @@ end
 
 get '/' do
 	output = ""
-	output += "<html><head><style type='text/css'>"
+	output += "<html><head>"
+	output += "<title>Intercom DNS Check</title>"
+	output += "<style type='text/css'>"
 	output += "div { padding: 3px } "
 	output += "body { font-size: 20px }"
 	output += ".info { background-color: #ff6600; color: #ffffff; }"
@@ -292,9 +294,9 @@ get '/' do
 	output += "form .form-item input[type=text] { display: block; width: 20em; font-size: 2em; }\n"
 	output += "input[type=submit] { font-size: 16px; border-radius: 5px; background-color: #2D6DC5; color: #ffffff; font-weight: bold; padding: 5px 18px 7px; border: 1px solid rgba(29,54,75,0.2);}"
 	output += "input[type=submit]:hover { background-color: #1946C4; }"
-
-
 	output += "</style></head><body>"
+	output += "<h1>Intercom DNS Check</h1>"
+	output += "<h3>Check your Intercom DKIM / Article Custom domain DNS settings</h3>"
 
 	dkim_output = check_dkim(params["dkim_domain"])
 
@@ -322,6 +324,8 @@ get '/' do
 	output += "</form>"
 	output += output_log(custom_domain_output)
 	output += "</div>"
+	output += "<hr>"
+	output += "<a href='https://github.com/thewheat/intercom-dns-check'>Source</a>"
 	output += "</body></html>"
 	output
 end
