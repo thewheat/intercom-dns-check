@@ -167,7 +167,7 @@ def check_dkim(domain)
 			dkim_output += "<div class='warn'>It looks like you're using Cloudflare. If you're having issues, ensure that you have <a href='https://support.cloudflare.com/hc/en-us/articles/200169056-CNAME-Flattening-RFC-compliant-support-for-CNAME-at-the-root'>disabled CNAME flattening</a> and that the DNS entry has a <a href='https://support.cloudflare.com/hc/en-us/articles/200169626-What-subdomains-are-appropriate-for-orange-gray-clouds-'>gray cloud to ensure the traffic goes to Intercom</a></div>"
 		end
 		if double_domain
-			dkim_output += "<div class='error'>CNAME exist for <code>#{get_intercom_dkim_double_domain(root_domain)}</code>. <BR><code class='indent'>#{double_domain}</code>.</div>"
+			dkim_output += "<div class='error'>I was able to find a CNAME for <code>#{get_intercom_dkim_double_domain(root_domain)}</code> (note the duplicate <code>#{root_domain}</code>). <BR><code class='indent'>#{double_domain}</code>.</div>"
 			dkim_output += "<div class='error'>This is likely an incorrect entry. If you have specified <code>#{get_intercom_dkim(root_domain)}</code> in your DNS server try use <code>#{get_intercom_dkim_base}</code> instead. Some DNS servers automatically add the domain name which can cause this error</div>"
 		end
 
