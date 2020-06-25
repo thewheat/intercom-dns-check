@@ -7,7 +7,7 @@ GEM
       addressable (~> 2.5)
     mustermann (1.0.3)
     public_suffix (3.0.3)
-    rack (2.0.8)
+    rack (2.2.3)
     rack-protection (2.0.4)
       rack
     sinatra (2.0.4)
